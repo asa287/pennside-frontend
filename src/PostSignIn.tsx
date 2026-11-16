@@ -244,6 +244,9 @@ type IntakeRecord = {
   flexibility: string;
   location: string;
   budget: number;
+  budgetMin?: number;
+  availableUntil?: string;
+  timeZone?: string;
   minParty: number;
   maxParty: number;
   duration: number;
@@ -440,6 +443,40 @@ const sampleRequests: IntakeRecord[] = [
   },
 ];
 
+const activityChoices = [
+  { name: "Board games", category: "Entertainment" },
+  { name: "Movie", category: "Entertainment" },
+  { name: "Coffee & conversation", category: "Social" },
+  { name: "Lunch or dinner", category: "Dining" },
+  { name: "Explore Philadelphia", category: "City exploration" },
+  { name: "Study session", category: "Academic" },
+  { name: "Sports & outdoors", category: "Wellness" },
+  { name: "Arts & culture", category: "Arts & culture" },
+  { name: "Other activity", category: "Other" },
+];
+const locationChoices = [
+  "Penn campus · student common area",
+  "Locust Walk / College Green",
+  "Penn Libraries",
+  "Tangen Hall",
+  "University City",
+  "Center City, Philadelphia",
+  "Online",
+  "Other location",
+];
+
+type ActivityPlan = {
+  activity: string;
+  customActivity: string;
+  start: string;
+  end: string;
+  budgetMin: number;
+  budgetMax: number;
+  location: string;
+  customLocation: string;
+  people: number;
+};
+
 function StructuredIntake({
   onComplete,
   onExit,
@@ -448,570 +485,472 @@ function StructuredIntake({
   onExit: () => void;
 }) {
   const [step, setStep] = useState(0);
-  const [record, setRecord] = useState<IntakeRecord>({ ...sampleRequests[0] });
-  const update = <K extends keyof IntakeRecord>(key: K, value: IntakeRecord[K]) =>
-    setRecord((current) => ({ ...current, [key]: value }));
-  const chooseSample = (index: number) => {
-    setRecord({ ...sampleRequests[index] });
+  const [consent, setConsent] = useState(false);
+  const [plan, setPlan] = useState<ActivityPlan>({
+    activity: "",
+    customActivity: "",
+    start: "",
+    end: "",
+    budgetMin: 0,
+    budgetMax: 30,
+    location: "",
+    customLocation: "",
+    people: 4,
+  });
+  const change = <K extends keyof ActivityPlan>(key: K, value: ActivityPlan[K]) => {
+    setPlan((current) => ({ ...current, [key]: value }));
+    setConsent(false);
   };
-  const analyze = () => {
-    const raw = record.rawInput.toLowerCase();
-    const match = raw.includes("movie")
-      ? 1
-      : raw.includes("center city") || raw.includes("explore philadelphia")
-        ? 2
-        : raw.includes("brunch")
-          ? 3
-          : raw.includes("coffee")
-            ? 4
-            : 0;
-    if (record.rawInput !== sampleRequests[0].rawInput) {
-      const parsed = { ...sampleRequests[match], rawInput: record.rawInput };
-      setRecord(parsed);
-    }
+  const activity = plan.activity === "Other activity" ? plan.customActivity.trim() : plan.activity;
+  const location = plan.location === "Other location" ? plan.customLocation.trim() : plan.location;
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const validStart = Boolean(plan.start && plan.start.slice(0, 10) >= today);
+  const validEnd = Boolean(plan.end && plan.end > plan.start);
+  const ready = Boolean(activity && location && validStart && validEnd);
+  const budget = plan.budgetMax === 0 ? "Free · $0" : `$${plan.budgetMin}–$${plan.budgetMax}`;
+  const availability = `${plan.start.replace("T", " at ")} – ${plan.end.replace("T", " at ")} (Eastern Time)`;
+  const summary = `${activity} | ${availability} | ${location} | ${budget}/person | ${plan.people} people, including you`;
+  const next = () => {
+    if (!ready) return;
     setStep(1);
+    window.scrollTo({ top: 0, behavior: "instant" });
   };
-  const updateTime = (time: string) =>
-    setRecord((current) => ({
-      ...current,
-      time,
-      missingFields: time ? "None" : "Time",
-      pipelineStage: time ? "Stage 2 · Ready for confirmation" : "Stage 1 · Requirement collection",
-      expectedAction: time
-        ? "Show structured request card for confirmation"
-        : "User completes the required time field inline",
-    }));
-  const reviewRequest = () => {
-    setRecord((current) => ({
-      ...current,
-      missingFields: "None",
-      pipelineStage: "Stage 2 · Ready for confirmation",
-      expectedAction: "Show structured request card for confirmation",
-      expectedQuestion: "Please review the request card and confirm whether to start matching.",
-    }));
-    setStep(2);
-  };
-  const summary = `${record.activity} | ${record.time ? record.time.replace("T", " ") : "time pending"} | ${record.location} | ≤$${record.budget}/person | ${record.minParty}–${record.maxParty} people | ${record.duration} minutes`;
   const finish = () => {
-    const confirmed = { ...record, confirmedSummary: summary };
+    if (!ready || !consent) return;
+    const category =
+      activityChoices.find((choice) => choice.name === plan.activity)?.category || "Other";
+    const hardConstraints = `Available: ${availability}; location: ${location}; budget: $${plan.budgetMin}–$${plan.budgetMax}/person; total party: ${plan.people}, including organizer`;
+    const request: IntakeRecord = {
+      ...sampleRequests[0],
+      syntheticUserId: "YOUR PLAN",
+      rawInput: "",
+      scenario: category,
+      category,
+      testCase: "Structured form",
+      activity,
+      activityExtracted: activity,
+      time: plan.start,
+      availableUntil: plan.end,
+      timeZone: "America/New_York",
+      flexibility: "Within selected availability",
+      location,
+      budgetMin: plan.budgetMin,
+      budget: plan.budgetMax,
+      minParty: plan.people,
+      maxParty: plan.people,
+      duration: Math.round((Date.parse(plan.end) - Date.parse(plan.start)) / 60000),
+      language: "No preference",
+      socialEnergy: "No preference",
+      softPreferences: "None specified",
+      hardConstraints,
+      missingFields: "None",
+      conflictFlag: "None",
+      pipelineStage: "Confirmed · demo",
+      confirmedSummary: summary,
+      expectedAction: "Use confirmed selections for matching",
+      expectedQuestion: "",
+      mockCandidates: 0,
+      expectedMatch: "Matching is not connected yet.",
+      invitationResult: "No invitation sent",
+      resourceStatus: "Not checked",
+      nextStep: "Explore demo events",
+      feedbackLoop: "Not started",
+    };
     onComplete({
       intent: "companion",
-      interests: [record.category, record.activity],
-      availability: [record.flexibility],
+      interests: [category, activity],
+      availability: [availability],
       meetup: "flexible",
-      groupSize: record.maxParty <= 2 ? "one" : "small",
+      groupSize: plan.people <= 2 ? "one" : "small",
       requirementMode: {
         event: "required",
         availability: "required",
         group: "required",
         meetup: "flexible",
       },
-      request: confirmed,
+      request,
     });
   };
-  const requiredHints = [
-    { label: "Activity", present: Boolean(record.activityExtracted) },
-    { label: "Date & time", present: Boolean(record.time) },
-    { label: "Location", present: Boolean(record.location) },
-    { label: "Budget / person", present: record.budget > 0 },
-    { label: "Group size", present: record.minParty > 0 && record.maxParty >= record.minParty },
-    { label: "Duration", present: record.duration > 0 },
-  ];
-  const stageLabels = ["Describe", "Review", "Confirm"];
-
+  const overview = (
+    <dl className="plan-overview">
+      <div>
+        <dt>Activity</dt>
+        <dd>{activity || "Choose an activity"}</dd>
+      </div>
+      <div>
+        <dt>Available from</dt>
+        <dd>{plan.start ? plan.start.replace("T", " at ") : "Choose a start time"}</dd>
+      </div>
+      <div>
+        <dt>Available until</dt>
+        <dd>{plan.end ? plan.end.replace("T", " at ") : "Choose an end time"}</dd>
+      </div>
+      <div>
+        <dt>Budget / person</dt>
+        <dd>
+          {budget} <small>USD</small>
+        </dd>
+      </div>
+      <div>
+        <dt>Location</dt>
+        <dd>{location || "Choose a location"}</dd>
+      </div>
+      <div>
+        <dt>Total participants</dt>
+        <dd>
+          {plan.people} people <small>including you</small>
+        </dd>
+      </div>
+    </dl>
+  );
   return (
-    <div className="intake-shell">
+    <div className="intake-shell selection-intake">
       <header className="intake-header">
-        <button onClick={onExit}>
+        <button onClick={onExit} aria-label="PennSide home">
           <Logo />
         </button>
-        <div className="intake-steps">
-          {stageLabels.map((label, index) => (
-            <span key={label} className={index === step ? "active" : index < step ? "done" : ""}>
+        <nav className="intake-steps" aria-label="Activity setup progress">
+          {["Plan", "Confirm"].map((label, index) => (
+            <span
+              key={label}
+              className={index === step ? "active" : index < step ? "done" : ""}
+              aria-current={index === step ? "step" : undefined}
+            >
               <i>{index < step ? "✓" : index + 1}</i>
               {label}
             </span>
           ))}
-        </div>
+        </nav>
         <button className="setup-exit" onClick={onExit}>
           Exit prototype
         </button>
       </header>
       <main className="intake-main">
-        {step === 0 && (
-          <section className="intake-compose">
-            <div className="intake-title">
-              <span className="app-kicker">NEW REQUEST · PENN COMMUNITY ONLY</span>
-              <h1>What would you like to do?</h1>
-              <p>
-                Describe it naturally. PennSide will organize only the details needed to form a
-                safe, practical plan.
-              </p>
-            </div>
-            <div className="raw-input-card">
-              <label htmlFor="raw-request">YOUR WORDS</label>
-              <textarea
-                id="raw-request"
-                value={record.rawInput}
-                onChange={(event) => update("rawInput", event.target.value)}
-                rows={6}
-              />
-              <div className="request-hints">
-                <div className="hint-heading">
-                  <div>
-                    <strong>For a match-ready request, try to include:</strong>
-                    <span>
-                      {requiredHints.filter((hint) => hint.present).length} of{" "}
-                      {requiredHints.length} essentials detected in this test case
-                    </span>
-                  </div>
-                  <small>Hints—not separate questions</small>
-                </div>
-                <div className="required-hints">
-                  {requiredHints.map((hint) => (
-                    <span key={hint.label} className={hint.present ? "present" : "missing"}>
-                      {hint.present ? <Icon name="check" /> : <i>!</i>}
-                      {hint.label}
-                      {!hint.present && <small>Missing</small>}
-                    </span>
-                  ))}
-                </div>
-                <div className="optional-hints">
-                  <strong>Helpful, but optional</strong>
-                  <span>Time flexibility</span>
-                  <span>Language</span>
-                  <span>Social energy</span>
-                  <span>Who you’d enjoy meeting</span>
-                </div>
-              </div>
-              <div className="raw-input-foot">
-                <span>
-                  <Icon name="shield" />
-                  Don’t include phone numbers, PennKey credentials, or private schedules.
-                </span>
-                <PrimaryButton onClick={analyze} disabled={!record.rawInput.trim()}>
-                  Organize my request
-                </PrimaryButton>
-              </div>
-            </div>
-            <div className="sample-requests">
-              <span>TRY A SYNTHETIC TEST CASE</span>
-              <div>
-                {sampleRequests.map((sample, index) => (
-                  <button
-                    key={sample.syntheticUserId}
-                    className={record.syntheticUserId === sample.syntheticUserId ? "active" : ""}
-                    onClick={() => chooseSample(index)}
+        <section>
+          <div className="intake-title">
+            <span className="app-kicker">
+              {step === 0 ? "A GOOD PLAN STARTS HERE" : "ONE LAST LOOK"}
+            </span>
+            <h1>{step === 0 ? "What’s your next plan?" : "Your plan, all together."}</h1>
+            <p>
+              {step === 0
+                ? "A few choices, and you’re on your way. Pick an activity and tell us what works for you."
+                : "Check the details below. You can go back and change anything before confirming."}
+            </p>
+          </div>
+          {step === 0 ? (
+            <form
+              className="plan-layout"
+              onSubmit={(event) => {
+                event.preventDefault();
+                next();
+              }}
+            >
+              <div className="plan-fields">
+                <fieldset className="plan-section">
+                  <legend>
+                    <span>01</span> The idea
+                  </legend>
+                  <label htmlFor="plan-activity">What would you like to organize?</label>
+                  <select
+                    id="plan-activity"
+                    required
+                    value={plan.activity}
+                    onChange={(e) => change("activity", e.target.value)}
                   >
-                    <small>{sample.syntheticUserId}</small>
-                    <strong>{sample.activity}</strong>
-                    <span>{sample.testCase}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {step === 1 && (
-          <section className="extraction-step">
-            <div className="intake-title">
-              <span className="app-kicker">AI-ASSISTED EXTRACTION · SIMULATED</span>
-              <h1>Here’s what I understood.</h1>
-              <p>
-                Review everything once. Complete any amber required field here—there is no separate
-                clarification round.
-              </p>
-            </div>
-            <div className="extraction-layout">
-              <div className="extraction-form">
-                <div className="inline-completion-note">
-                  <Icon name="spark" />
-                  <p>
-                    <strong>One review, then confirm.</strong>
-                    Correct the extraction and fill any missing essential directly in this form.
+                    <option value="" disabled>
+                      Choose an activity
+                    </option>
+                    {activityChoices.map((choice) => (
+                      <option key={choice.name}>{choice.name}</option>
+                    ))}
+                  </select>
+                  {plan.activity === "Other activity" && (
+                    <label className="plan-custom">
+                      Activity name
+                      <input
+                        required
+                        maxLength={100}
+                        pattern=".*\S.*"
+                        value={plan.customActivity}
+                        onChange={(e) => change("customActivity", e.target.value)}
+                        placeholder="e.g. A photography walk"
+                      />
+                    </label>
+                  )}
+                </fieldset>
+                <fieldset className="plan-section">
+                  <legend>
+                    <span>02</span> Your available time
+                  </legend>
+                  <p className="plan-help">
+                    Choose a window when you’re free. All times are Eastern Time (Penn /
+                    Philadelphia).
                   </p>
-                </div>
-                <div className="form-section-heading">
-                  <span>01</span>
-                  <div>
-                    <strong>Activity</strong>
-                    <small>What kind of plan this is</small>
+                  <div className="plan-grid">
+                    <label>
+                      Available from
+                      <input
+                        type="datetime-local"
+                        required
+                        min={`${today}T00:00`}
+                        value={plan.start}
+                        onInput={(e) => change("start", e.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      Available until
+                      <input
+                        type="datetime-local"
+                        required
+                        min={plan.start || `${today}T00:00`}
+                        value={plan.end}
+                        aria-invalid={Boolean(plan.end && !validEnd)}
+                        aria-describedby={plan.end && !validEnd ? "plan-time-error" : undefined}
+                        onInput={(e) => change("end", e.currentTarget.value)}
+                      />
+                    </label>
                   </div>
-                </div>
-                <div className="field-grid three">
-                  <label>
-                    <span>SCENARIO</span>
-                    <input
-                      value={record.scenario}
-                      onChange={(e) => update("scenario", e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>CATEGORY</span>
-                    <input
-                      value={record.category}
-                      onChange={(e) => update("category", e.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>ACTIVITY EXTRACTED</span>
-                    <input
-                      value={record.activityExtracted}
-                      onChange={(e) => update("activityExtracted", e.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="form-section-heading">
-                  <span>02</span>
-                  <div>
-                    <strong>When and where</strong>
-                    <small>Hard logistics for a feasible plan</small>
+                  {plan.end && !validEnd && (
+                    <p className="plan-error" id="plan-time-error" role="alert">
+                      Choose an end time after your start time.
+                    </p>
+                  )}
+                  {plan.start && !validStart && (
+                    <p className="plan-error" role="alert">
+                      Choose today or a future date.
+                    </p>
+                  )}
+                </fieldset>
+                <fieldset className="plan-section budget-section">
+                  <legend>
+                    <span>03</span> Your budget
+                  </legend>
+                  <div className="budget-heading">
+                    <p className="plan-help">
+                      Per person · USD. Drag either handle to set your range.
+                    </p>
+                    <output aria-live="polite">{budget}</output>
                   </div>
-                </div>
-                <div className="field-grid">
-                  <label className={record.time ? "" : "missing"}>
-                    <span>DATE & TIME</span>
-                    <input
-                      type="datetime-local"
-                      value={record.time}
-                      onChange={(e) => updateTime(e.target.value)}
+                  <div className="budget-slider">
+                    <div className="budget-track" />
+                    <div
+                      className="budget-fill"
+                      style={{
+                        left: `${plan.budgetMin / 2}%`,
+                        right: `${100 - plan.budgetMax / 2}%`,
+                      }}
                     />
-                    {!record.time && <small>Missing—required to continue</small>}
-                  </label>
-                  <label>
-                    <span>TIME FLEXIBILITY</span>
-                    <select
-                      value={record.flexibility}
-                      onChange={(e) => update("flexibility", e.target.value)}
-                    >
-                      <option>Fixed</option>
-                      <option>Any time this week</option>
-                      <option>Any time this weekend</option>
-                    </select>
-                  </label>
-                  <label className="wide">
-                    <span>LOCATION</span>
                     <input
-                      value={record.location}
-                      onChange={(e) => update("location", e.target.value)}
+                      type="range"
+                      aria-label="Minimum budget per person"
+                      aria-valuemax={plan.budgetMax}
+                      aria-valuetext={`$${plan.budgetMin} per person`}
+                      min={0}
+                      max={200}
+                      step={5}
+                      value={plan.budgetMin}
+                      onChange={(e) =>
+                        change("budgetMin", Math.min(Number(e.target.value), plan.budgetMax))
+                      }
                     />
-                  </label>
-                </div>
-                <div className="form-section-heading">
-                  <span>03</span>
-                  <div>
-                    <strong>Group and resources</strong>
-                    <small>Used to check feasibility before matching</small>
+                    <input
+                      type="range"
+                      aria-label="Maximum budget per person"
+                      aria-valuemin={plan.budgetMin}
+                      aria-valuetext={`$${plan.budgetMax} per person`}
+                      min={0}
+                      max={200}
+                      step={5}
+                      value={plan.budgetMax}
+                      onChange={(e) =>
+                        change("budgetMax", Math.max(Number(e.target.value), plan.budgetMin))
+                      }
+                    />
                   </div>
-                </div>
-                <div className="field-grid four">
-                  <label>
-                    <span>BUDGET / PERSON</span>
-                    <div className="money-input">
-                      <i>$</i>
+                  <div className="budget-scale">
+                    <span>$0 · Free</span>
+                    <span>$100</span>
+                    <span>$200</span>
+                  </div>
+                  <div className="plan-grid budget-exact">
+                    <label>
+                      Minimum ($)
                       <input
                         type="number"
-                        value={record.budget}
-                        onChange={(e) => update("budget", Number(e.target.value))}
+                        required
+                        min={0}
+                        max={plan.budgetMax}
+                        step={5}
+                        value={plan.budgetMin}
+                        onChange={(e) =>
+                          change(
+                            "budgetMin",
+                            Math.max(0, Math.min(Number(e.target.value), plan.budgetMax)),
+                          )
+                        }
                       />
-                    </div>
-                  </label>
-                  <label>
-                    <span>MIN TOTAL PEOPLE</span>
-                    <input
-                      type="number"
-                      value={record.minParty}
-                      onChange={(e) => update("minParty", Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    <span>MAX TOTAL PEOPLE</span>
-                    <input
-                      type="number"
-                      value={record.maxParty}
-                      onChange={(e) => update("maxParty", Number(e.target.value))}
-                    />
-                  </label>
-                  <label>
-                    <span>DURATION (MIN)</span>
-                    <input
-                      type="number"
-                      value={record.duration}
-                      onChange={(e) => update("duration", Number(e.target.value))}
-                    />
-                  </label>
-                </div>
-                <div className="form-section-heading">
-                  <span>04</span>
-                  <div>
-                    <strong>Social preferences</strong>
-                    <small>Helpful context, never a reason to exclude by default</small>
+                    </label>
+                    <label>
+                      Maximum ($)
+                      <input
+                        type="number"
+                        required
+                        min={plan.budgetMin}
+                        max={200}
+                        step={5}
+                        value={plan.budgetMax}
+                        onChange={(e) =>
+                          change(
+                            "budgetMax",
+                            Math.min(200, Math.max(Number(e.target.value), plan.budgetMin)),
+                          )
+                        }
+                      />
+                    </label>
                   </div>
-                </div>
-                <div className="field-grid">
-                  <label>
-                    <span>LANGUAGE</span>
-                    <select
-                      value={record.language}
-                      onChange={(e) => update("language", e.target.value)}
-                    >
-                      <option>No preference</option>
-                      <option>English or Chinese</option>
-                      <option>English</option>
-                      <option>Chinese</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>SOCIAL ENERGY</span>
-                    <select
-                      value={record.socialEnergy}
-                      onChange={(e) => update("socialEnergy", e.target.value)}
-                    >
-                      <option>Quiet / low social energy</option>
-                      <option>Casual conversation</option>
-                      <option>Active / high social energy</option>
-                      <option>No preference</option>
-                    </select>
-                  </label>
-                  <label className="wide">
-                    <span>OTHER SOFT PREFERENCES</span>
-                    <input
-                      value={record.softPreferences}
-                      onChange={(e) => update("softPreferences", e.target.value)}
-                    />
-                  </label>
-                </div>
-              </div>
-              <aside className="extraction-audit">
-                <span className="app-kicker">EXTRACTION STATUS</span>
-                <div className="audit-score">
-                  <strong>{record.missingFields === "None" ? "100" : "88"}%</strong>
-                  <span>fields recognized</span>
-                </div>
-                <div className="audit-row">
-                  <span>Test case</span>
-                  <strong>{record.testCase}</strong>
-                </div>
-                <div className="audit-row">
-                  <span>Current stage</span>
-                  <strong>{record.pipelineStage}</strong>
-                </div>
-                <div className="audit-row">
-                  <span>Missing</span>
-                  <strong className={record.missingFields === "None" ? "" : "warning"}>
-                    {record.missingFields}
-                  </strong>
-                </div>
-                <div className="audit-row">
-                  <span>Conflict / risk</span>
-                  <strong>{record.conflictFlag}</strong>
-                </div>
-                <div className="audit-note">
-                  <Icon name="spark" />
-                  <p>
-                    <strong>Next AI action</strong>
-                    {record.expectedAction}
+                  <button
+                    className="budget-free"
+                    type="button"
+                    onClick={() => {
+                      setPlan((current) => ({ ...current, budgetMin: 0, budgetMax: 0 }));
+                      setConsent(false);
+                    }}
+                  >
+                    Keep it free · $0
+                  </button>
+                </fieldset>
+                <fieldset className="plan-section">
+                  <legend>
+                    <span>04</span> The place & the people
+                  </legend>
+                  <div className="plan-grid">
+                    <label>
+                      Where would you like to meet?
+                      <select
+                        required
+                        value={plan.location}
+                        onChange={(e) => change("location", e.target.value)}
+                      >
+                        <option value="" disabled>
+                          Choose a location
+                        </option>
+                        {locationChoices.map((place) => (
+                          <option key={place}>{place}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Expected participants
+                      <select
+                        value={plan.people}
+                        onChange={(e) => change("people", Number(e.target.value))}
+                      >
+                        {[2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16, 20].map((count) => (
+                          <option value={count} key={count}>
+                            {count} people, including you
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  {plan.location === "Other location" && (
+                    <label className="plan-custom">
+                      Meeting place
+                      <input
+                        required
+                        maxLength={150}
+                        pattern=".*\S.*"
+                        value={plan.customLocation}
+                        onChange={(e) => change("customLocation", e.target.value)}
+                        placeholder="A public place or venue"
+                      />
+                    </label>
+                  )}
+                  <p className="plan-help">
+                    The total includes you as the organizer. You can arrange the exact meeting spot
+                    later.
                   </p>
+                </fieldset>
+              </div>
+              <aside className="plan-side">
+                <div className="plan-summary-card">
+                  <span className="app-kicker">YOUR PLAN AT A GLANCE</span>
+                  <h2>
+                    A little plan.
+                    <br />A shared possibility.
+                  </h2>
+                  {overview}
+                  <p className="plan-help">You’ll review these details before continuing.</p>
                 </div>
+                <button className="app-primary plan-submit" type="submit">
+                  Review my plan <Arrow />
+                </button>
+                <p className="plan-footnote">
+                  Choose your activity, time window, and location to continue.
+                </p>
               </aside>
-            </div>
-            <div className="intake-actions">
-              <button onClick={() => setStep(0)}>
-                <Arrow back />
-                Back
-              </button>
-              <div className="review-action">
-                {!record.time && <span>Add the missing date & time above to continue.</span>}
-                <PrimaryButton onClick={reviewRequest} disabled={!record.time}>
-                  Review request card
-                </PrimaryButton>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {step === 2 && (
-          <section className="record-review">
-            <div className="intake-title">
-              <span className="app-kicker">CONFIRM BEFORE MATCHING</span>
-              <h1>Your request, structured.</h1>
-              <p>User-provided needs stay separate from system-generated test expectations.</p>
-            </div>
-            <div className="record-review-layout">
-              <div className="confirmed-request-card">
-                <div className="confirmed-request-head">
-                  <div>
-                    <span className="app-kicker">{record.category}</span>
-                    <h2>{record.activity}</h2>
-                  </div>
-                  <Badge tone="verified">Ready to confirm</Badge>
-                </div>
-                <div className="confirmed-core">
-                  <div>
-                    <Icon name="calendar" />
-                    <span>
-                      <small>TIME</small>
-                      <strong>{record.time.replace("T", " ")}</strong>
-                      <i>{record.flexibility}</i>
-                    </span>
-                  </div>
-                  <div>
-                    <Icon name="pin" />
-                    <span>
-                      <small>LOCATION</small>
-                      <strong>{record.location}</strong>
-                    </span>
-                  </div>
-                  <div>
-                    <Icon name="people" />
-                    <span>
-                      <small>TOTAL PARTY</small>
-                      <strong>
-                        {record.minParty}–{record.maxParty} people
-                      </strong>
-                    </span>
-                  </div>
-                  <div>
-                    <Icon name="clock" />
-                    <span>
-                      <small>DURATION</small>
-                      <strong>{record.duration} minutes</strong>
-                    </span>
-                  </div>
-                  <div>
-                    <span className="currency-mark">$</span>
-                    <span>
-                      <small>BUDGET CAP</small>
-                      <strong>${record.budget} / person</strong>
-                    </span>
-                  </div>
-                  <div>
-                    <Icon name="people" />
-                    <span>
-                      <small>SOCIAL ENERGY</small>
-                      <strong>{record.socialEnergy}</strong>
-                    </span>
-                  </div>
-                </div>
-                <div className="constraint-block">
-                  <span>HARD CONSTRAINTS · USED TO ELIMINATE INFEASIBLE OPTIONS</span>
-                  <p>
-                    {record.hardConstraints}; time: {record.time.replace("T", " ")}
-                  </p>
-                </div>
-                <div className="preference-block">
-                  <span>SOFT PREFERENCES · USED TO RANK, NOT EXCLUDE</span>
-                  <p>
-                    {record.softPreferences} · Language: {record.language}
-                  </p>
-                </div>
-                <div className="summary-line">
-                  <span>CONFIRMED SUMMARY</span>
-                  <strong>{summary}</strong>
-                </div>
-              </div>
-              <aside className="pipeline-preview">
-                <span className="app-kicker">PIPELINE PREVIEW</span>
-                <h3>What happens after confirmation</h3>
-                <div className="pipeline-stage active">
-                  <span>01</span>
-                  <p>
-                    <strong>Constraint check</strong>Validate time, place, budget, group size, and
-                    Penn verification.
-                  </p>
-                </div>
-                <div className="pipeline-stage">
-                  <span>02</span>
-                  <p>
-                    <strong>Candidate generation</strong>
-                    {record.mockCandidates} synthetic candidate
-                    {record.mockCandidates === 1 ? "" : "s"} in this test case.
-                  </p>
-                </div>
-                <div className="pipeline-stage">
-                  <span>03</span>
-                  <p>
-                    <strong>Mutual invitation</strong>No contact details are shared without both
-                    sides accepting.
-                  </p>
-                </div>
-                <div className="resource-preview">
-                  <span>SIMULATED RESOURCE STATUS</span>
-                  <strong>{record.resourceStatus}</strong>
-                  <p>{record.expectedMatch}</p>
-                </div>
-              </aside>
-            </div>
-            <details className="record-details">
-              <summary>
-                View complete structured test record <span>All 30 pipeline fields</span>
-              </summary>
-              <div className="record-table">
-                {[
-                  ["Synthetic_User_ID", record.syntheticUserId],
-                  ["Raw_Input", record.rawInput],
-                  ["Scenario", record.scenario],
-                  ["Test_Case", record.testCase],
-                  ["Pipeline_Stage", record.pipelineStage],
-                  ["Category", record.category],
-                  ["Activity", record.activity],
-                  ["Activity_Extracted", record.activityExtracted],
-                  ["Time", record.time.replace("T", " ")],
-                  ["Flexibility", record.flexibility],
-                  ["Location", record.location],
-                  ["Budget_USD", `$${record.budget}`],
-                  ["Min_Party", record.minParty],
-                  ["Max_Party", record.maxParty],
-                  ["Duration_Minutes", record.duration],
-                  ["Language", record.language],
-                  ["Social_Energy", record.socialEnergy],
-                  ["Soft_Preferences", record.softPreferences],
-                  ["Hard_Constraints", record.hardConstraints],
-                  ["Missing_Fields", record.missingFields],
-                  ["Conflict_Flag", record.conflictFlag],
-                  ["Expected_Action", record.expectedAction],
-                  ["Expected_Question", record.expectedQuestion],
-                  ["Confirmed_Summary", summary],
-                  ["Mock_Candidates", record.mockCandidates],
-                  ["Expected_Match", record.expectedMatch],
-                  ["Invitation_Result", record.invitationResult],
-                  ["Resource_Status", record.resourceStatus],
-                  ["Next_Step", record.nextStep],
-                  ["Feedback_Loop", record.feedbackLoop],
-                ].map(([key, value]) => (
-                  <div key={String(key)}>
-                    <span>{key}</span>
-                    <strong>{value}</strong>
-                  </div>
-                ))}
-              </div>
-            </details>
-            <div className="confirmation-consent">
-              <label>
-                <input type="checkbox" defaultChecked />
-                <i>
-                  <Icon name="check" />
-                </i>
-                <span>
-                  <strong>I’ve reviewed the hard constraints.</strong>
-                  <small>Start matching only from this confirmed version.</small>
+            </form>
+          ) : (
+            <div className="plan-layout plan-confirmation">
+              <div className="plan-summary-card">
+                <span className="app-kicker">
+                  {activityChoices.find((choice) => choice.name === plan.activity)?.category}
                 </span>
-              </label>
-              <div>
-                <Icon name="shield" />
-                <p>Contact details remain hidden through candidate generation and invitation.</p>
+                <h2>{activity}</h2>
+                {overview}
+                <p className="plan-help">
+                  Availability is in Eastern Time (America/New_York). Budget is per person in US
+                  dollars.
+                </p>
               </div>
+              <aside className="plan-side">
+                <div className="plan-summary-card">
+                  <span className="app-kicker">YOU’RE IN CONTROL</span>
+                  <h2>
+                    Ready when
+                    <br />
+                    you are.
+                  </h2>
+                  <p>Confirm your choices to continue to the event companion.</p>
+                  <p className="plan-help">
+                    This is a prototype. Matching and invitations are still demonstrations;
+                    confirming won’t send an invitation.
+                  </p>
+                  <label className="plan-consent">
+                    <input
+                      type="checkbox"
+                      checked={consent}
+                      onChange={(e) => setConsent(e.target.checked)}
+                    />
+                    <span>
+                      I’ve reviewed my activity, availability, budget, location, and participant
+                      count.
+                    </span>
+                  </label>
+                  <PrimaryButton onClick={finish} disabled={!consent}>
+                    Confirm my plan
+                  </PrimaryButton>
+                  <button
+                    className="plan-edit"
+                    onClick={() => {
+                      setStep(0);
+                      setConsent(false);
+                      window.scrollTo({ top: 0, behavior: "instant" });
+                    }}
+                  >
+                    <Arrow back /> Edit my plan
+                  </button>
+                </div>
+              </aside>
             </div>
-            <div className="intake-actions">
-              <button onClick={() => setStep(1)}>
-                <Arrow back />
-                Edit request
-              </button>
-              <PrimaryButton onClick={finish}>Confirm and enter matching pool</PrimaryButton>
-            </div>
-          </section>
-        )}
+          )}
+        </section>
       </main>
     </div>
   );
