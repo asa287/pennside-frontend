@@ -477,6 +477,63 @@ type ActivityPlan = {
   people: number;
 };
 
+const planExamples = [
+  {
+    name: "Board games",
+    activity: "Board games",
+    location: "Penn campus · student common area",
+    people: 4,
+    budgetMin: 0,
+    budgetMax: 15,
+    from: "18:00",
+    until: "21:00",
+  },
+  {
+    name: "Coffee chat",
+    activity: "Coffee & conversation",
+    location: "University City",
+    people: 2,
+    budgetMin: 5,
+    budgetMax: 20,
+    from: "14:00",
+    until: "16:00",
+  },
+  {
+    name: "Movie night",
+    activity: "Movie",
+    location: "Center City, Philadelphia",
+    people: 4,
+    budgetMin: 10,
+    budgetMax: 40,
+    from: "19:00",
+    until: "22:00",
+  },
+];
+
+function examplePlan(index: number): ActivityPlan {
+  const example = planExamples[index];
+  const campusDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const tomorrow = new Date(`${campusDate}T12:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const day = tomorrow.toISOString().slice(0, 10);
+  return {
+    activity: example.activity,
+    customActivity: "",
+    start: `${day}T${example.from}`,
+    end: `${day}T${example.until}`,
+    budgetMin: example.budgetMin,
+    budgetMax: example.budgetMax,
+    location: example.location,
+    customLocation: "",
+    people: example.people,
+  };
+}
+
 function StructuredIntake({
   onComplete,
   onExit,
@@ -486,17 +543,11 @@ function StructuredIntake({
 }) {
   const [step, setStep] = useState(0);
   const [consent, setConsent] = useState(false);
-  const [plan, setPlan] = useState<ActivityPlan>({
-    activity: "",
-    customActivity: "",
-    start: "",
-    end: "",
-    budgetMin: 0,
-    budgetMax: 30,
-    location: "",
-    customLocation: "",
-    people: 4,
-  });
+  const [plan, setPlan] = useState<ActivityPlan>(() => examplePlan(0));
+  const fillExample = (index: number) => {
+    setPlan(examplePlan(index));
+    setConsent(false);
+  };
   const change = <K extends keyof ActivityPlan>(key: K, value: ActivityPlan[K]) => {
     setPlan((current) => ({ ...current, [key]: value }));
     setConsent(false);
@@ -643,6 +694,24 @@ function StructuredIntake({
                 : "Check the details below. You can go back and change anything before confirming."}
             </p>
           </div>
+          {step === 0 && (
+            <div className="plan-examples">
+              <div>
+                <span className="app-kicker">TRY AN EXAMPLE</span>
+                <p>
+                  A board game example is prefilled to get you started. Examples use tomorrow’s
+                  date. Edit any detail, or go straight to review.
+                </p>
+              </div>
+              <div className="plan-example-buttons">
+                {planExamples.map((example, index) => (
+                  <button type="button" key={example.name} onClick={() => fillExample(index)}>
+                    Fill {example.name.toLowerCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {step === 0 ? (
             <form
               className="plan-layout"
